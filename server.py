@@ -5,21 +5,18 @@ from flask import Flask, render_template_string, request, Response
 
 app = Flask(__name__)
 
-# Основна колекція ретро-додатків
 ARCHIVE_ID = "legacy_ios_apps"
 ARCHIVE_API_URL = f"https://archive.org/metadata/{ARCHIVE_ID}"
 
-# Глобальний кеш
 CACHE_DATA = []
 LAST_CACHE_TIME = 0
-CACHE_TIMEOUT = 600  # Кеш на 10 хвилин
+CACHE_TIMEOUT = 600
 
 
 def get_cached_apps():
     global CACHE_DATA, LAST_CACHE_TIME
     current_time = time.time()
 
-    # Віддаємо кеш, якщо він актуальний
     if CACHE_DATA and (current_time - LAST_CACHE_TIME < CACHE_TIMEOUT):
         return CACHE_DATA
 
@@ -28,33 +25,31 @@ def get_cached_apps():
     }
 
     try:
-        response = requests.get(ARCHIVE_API_URL, headers=headers, timeout=15)
+        response = requests.get(ARCHIVE_API_URL, headers=headers, timeout=10)
         if response.status_code == 200:
             files = response.json().get('files', [])
             new_files = [
                 f for f in files 
-                if f.get('name', '').endswith('.ipa') and not f.get('name', '').startswith('__')
+                if isinstance(f, dict) and f.get('name', '').endswith('.ipa') and not f.get('name', '').startswith('__')
             ]
             if new_files:
                 CACHE_DATA = new_files
                 LAST_CACHE_TIME = current_time
     except Exception as e:
-        print(f"Error fetching from archive.org: {e}")
+        print(f"Error fetching metadata: {e}")
 
     return CACHE_DATA
 
 
 @app.route('/')
 def index():
-    search_query = request.args.get('search', '').lower()
+    search_query = request.args.get('search', '').strip().lower()
     user_agent = request.headers.get('User-Agent', '').lower()
 
-    # Визначаємо, чи це iOS-пристрій
     is_ios = any(device in user_agent for device in ['iphone', 'ipad', 'ipod'])
 
     files = get_cached_apps()
 
-    # Фільтрація за пошуком
     if search_query:
         files = [f for f in files if search_query in f.get('name', '').lower()]
 
@@ -62,7 +57,7 @@ def index():
     <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
     <html>
     <head>
-        <title>iOS Retro Store 28GB</title>
+        <title>iOS Retro Store</title>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
@@ -74,7 +69,7 @@ def index():
             
             <form action="/" method="get">
                 <b>Поиск приложения:</b> 
-                <input type="text" name="search" size="20">
+                <input type="text" name="search" size="20" value="{{ search_query }}">
                 <input type="submit" value="Искать">
             </form>
             <br>
@@ -102,7 +97,7 @@ def index():
                 <tr>
                     <td><font face="Arial" size="2"><b>{{ file.name }}</b></font></td>
                     <td align="center"><font size="2">
-                        {% if file.size %}
+                        {% if file.get('size') %}
                             {{ (file.size|int / 1024 / 1024)|round(1) }} MB
                         {% else %}
                             --
@@ -120,8 +115,8 @@ def index():
             {% else %}
                 <tr>
                     <td colspan="3" align="center">
-                        <b>Приложения не найдены или загружаются...</b><br>
-                        Обновите страницу через пару секунд.
+                        <b>Приложения загружаются или список пуст...</b><br>
+                        Попробуйте обновить страницу через несколько секунд.
                     </td>
                 </tr>
             {% endif %}
@@ -139,13 +134,13 @@ def index():
         files=files,
         archive_id=ARCHIVE_ID,
         host_url=host_url,
-        is_ios=is_ios
+        is_ios=is_ios,
+        search_query=search_query
     )
 
 
 @app.route('/plist/<path:filename>')
 def generate_plist(filename):
-    """Генерація manifest.plist для iOS OTA-установки"""
     ipa_url = f"https://archive.org/download/{ARCHIVE_ID}/{filename}"
     app_title = filename.replace('.ipa', '')
 
